@@ -1,0 +1,100 @@
+#!/bin/sh
+
+#Script for sshpass with the progress meter.
+
+
+#$1: Argument for exit command.
+function showUsage() {
+  cat << EOF
+Usage: $0 [options]
+Options(needed):
+  -p, --pass        Set password for the scp command.
+  --scp             Define scp command options as double-quoted argument.
+
+Options:
+  --expect          Expected string to input the password. "password:" as default.
+  --timeout         Set timeout (5sec as default) for waiting the expected message.
+  -h, --help        Print this message end exit.
+
+Example: $0 -p zzzzzz --scp "-P 22 ./file.txt user@example.com:/home/user"
+
+EOF
+
+  exit $1
+}
+
+
+#Check if 'expect' command does exist.
+which expect >/dev/null
+if [ $? != 0 ]; then
+  echo "This command needs 'expect' command. Please check if you have it."
+  exit 1
+fi
+
+#Set long options.
+while [ "$#" -gt 0 ]; do
+  ARG="$1";shift
+  case "$ARG" in
+    --scp)
+      SCPOPT="$1"; shift;;
+    --pass)
+      PASSWORD="$1"; shift;;
+    --expect)
+      EXPECT="$1"; shift;;
+    --timeout)
+      TIMEOUT="$1"; shift;;
+    --help) 
+      showUsage 0;;
+    --*)
+      showUsage 1;;
+    -*)
+      if [[ "$1" =~ ^\- ]]; then SHORTOPTS+="$ARG ";
+      else SHORTOPTS+="$ARG $1 "; shift; fi
+  esac
+done
+
+#Set short options.
+while getopts hp: OPT $SHORTOPTS; do
+  case "$OPT" in
+    h)
+      showUsage 0;;
+    p)
+      PASSWORD="$OPTARG";;
+    *)
+      showUsage 1;;
+  esac
+  shift
+done
+
+#Check if needed arguments have been set.
+if [[ -z "$PASSWORD" || -z "$SCPOPT" ]]; then
+  showUsage 1
+fi
+
+#Set a default value if it's empty.
+if [ -z "$EXPECT" ]; then
+  EXPECT="password:"
+fi
+if [ -z "$TIMEOUT" ]; then
+  TIMEOUT=5
+fi
+
+expect -c "
+  set timeout $TIMEOUT
+  spawn env LANG=C scp $SCPOPT
+  expect {
+    timeout {exit 1}
+    \"$EXPECT\" {send \"$PASSWORD\n\"}
+  }
+  expect {
+    timeout {interact}
+    \"$EXPECT\" {exit 2}
+  }
+"
+
+case $? in
+  1) echo ""; echo -e "\e[31m[Timeout Error] Check connection or the expected string.\e[m"; showUsage 1;;
+  2) echo ""; echo -e "\e[31m[Password Error] Check the password.\e[m"; showUsage 1;;
+esac
+
+exit 0
